@@ -19,24 +19,46 @@ jobs:
     - name: Install pipenv
       run: pip install pipenv
     
-    - name: Download all Python packages using pipenv
+    - name: Verify Pipfile.lock exists
       run: |
-        echo "📦 Descargando dependencias Python usando pipenv..."
+        echo "🔍 Verificando archivos..."
+        ls -la
+        if [ ! -f "Pipfile.lock" ]; then
+          echo "❌ ERROR: Pipfile.lock no encontrado"
+          exit 1
+        fi
+        echo "✅ Pipfile.lock encontrado"
+    
+    - name: Generate requirements.txt from Pipfile.lock
+      run: |
+        echo "📋 Generando requirements.txt desde Pipfile.lock..."
         
-        # Crear directorio para los paquetes
+        # Generar requirements.txt con versiones EXACTAS
+        pipenv requirements > requirements.txt
+        
+        echo "📊 Primeras 20 líneas de requirements.txt:"
+        head -20 requirements.txt
+        
+        echo "📊 Total de paquetes:"
+        wc -l requirements.txt
+    
+    - name: Download all packages
+      run: |
+        echo "📦 Descargando paquetes Python..."
         mkdir -p python-packages
         
-        # Usar pipenv download que respeta perfectamente el Pipfile.lock
-        pipenv download --ignore-pipfile --dest python-packages/
-        
-        # Generar requirements.txt para referencia
-        pipenv requirements > python-packages/requirements.txt
+        # Descargar todos los paquetes con las versiones exactas
+        # Usamos --no-deps porque requirements.txt ya tiene todas las dependencias
+        pip download -r requirements.txt -d python-packages/ --no-deps
         
         # Ver qué se descargó
         echo "📊 Archivos descargados:"
         ls python-packages/ | head -20
         echo "Total archivos: $(ls python-packages/ | wc -l)"
         du -sh python-packages/
+    
+    - name: Copy requirements.txt to packages folder
+      run: cp requirements.txt python-packages/
     
     - name: Compress packages
       run: |
