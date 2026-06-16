@@ -1,4 +1,4 @@
-name: Download Python Dependencies (Failsafe)
+name: Download Python Dependencies
 
 on:
   workflow_dispatch:
@@ -16,62 +16,64 @@ jobs:
       with:
         python-version: '3.9'
     
-    - name: Upgrade pip
-      run: python -m pip install --upgrade pip
+    - name: Install pipenv
+      run: pip install pipenv
     
-    - name: Download packages bypassing dependency resolver
+    - name: Verify Pipfile.lock exists
       run: |
-        cat << 'EOF' > download_all.py
-        import json
-        import subprocess
-        import sys
-        import os
-
-        print("📖 Leyendo Pipfile.lock...")
-        with open('Pipfile.lock', 'r') as f:
-            lock_data = json.load(f)
-
-        packages = []
-        # Extraer paquetes de las secciones default y develop
-        for section in ['default', 'develop']:
-            if section in lock_data:
-                for pkg_name, pkg_info in lock_data[section].items():
-                    if 'version' in pkg_info:
-                        version = pkg_info['version']
-                        packages.append(f"{pkg_name}{version}")
-
-        print(f"📦 Se encontraron {len(packages)} paquetes en el lockfile.")
-        os.makedirs('python-packages', exist_ok=True)
-
-        # Crear un requirements.txt limpio (solo nombre==version)
-        with open('python-packages/requirements.txt', 'w') as f:
-            for pkg in packages:
-                f.write(pkg + "\n")
-
-        failed = []
-        # Descargar cada paquete INDIVIDUALMENTE sin resolver dependencias
-        for i, pkg in enumerate(packages):
-            print(f"[{i+1}/{len(packages)}] Descargando {pkg}...")
-            cmd = [sys.executable, "-m", "pip", "download", pkg, "--no-deps", "-d", "python-packages/"]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"⚠️ Falló {pkg}: {result.stderr}")
-                failed.append(pkg)
-
-        print(f"\n✅ Descarga completada. Fallaron {len(failed)} paquetes.")
-        if failed:
-            print("Paquetes fallidos:", failed)
-        EOF
+        echo "🔍 Verificando archivos..."
+        ls -la
+        if [ ! -f "Pipfile.lock" ]; then
+          echo "❌ ERROR: Pipfile.lock no encontrado"
+          exit 1
+        fi
+        echo "✅ Pipfile.lock encontrado"
+        echo "📊 Tamaño del Pipfile.lock:"
+        wc -l Pipfile.lock
+    
+    - name: Generate requirements.txt from Pipfile.lock
+      run: |
+        echo "📋 Generando requirements.txt desde Pipfile.lock..."
         
-        python download_all.py
+        # Usar pipenv lock -r que genera requirements.txt DIRECTAMENTE del lockfile
+        # sin intentar resolver dependencias
+        pipenv lock -r > requirements.txt
         
-        echo "📊 Total de archivos descargados:"
-        ls python-packages/ | wc -l
+        echo "📊 Primeras 20 líneas de requirements.txt:"
+        head -20 requirements.txt
+        
+        echo "📊 Total de paquetes:"
+        wc -l requirements.txt
+        
+        # Verificar que se generó correctamente
+        if [ ! -s requirements.txt ]; then
+          echo "❌ ERROR: requirements.txt está vacío"
+          exit 1
+        fi
+        echo "✅ requirements.txt generado correctamente"
+    
+    - name: Download all packages
+      run: |
+        echo "📦 Descargando paquetes Python..."
+        mkdir -p python-packages
+        
+        # Descargar todos los paquetes con las versiones exactas
+        # --no-deps porque requirements.txt ya tiene TODAS las dependencias
+        pip download -r requirements.txt -d python-packages/ --no-deps
+        
+        # Ver qué se descargó
+        echo "📊 Archivos descargados:"
+        ls python-packages/ | head -20
+        echo "Total archivos: $(ls python-packages/ | wc -l)"
         du -sh python-packages/
+    
+    - name: Copy requirements.txt to packages folder
+      run: cp requirements.txt python-packages/
     
     - name: Compress packages
       run: |
         tar -czf python-dependencies.tar.gz python-packages/
+        echo "📦 Tamaño del archivo comprimido:"
         ls -lh python-dependencies.tar.gz
     
     - name: Upload artifact
