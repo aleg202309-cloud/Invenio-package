@@ -1,4 +1,4 @@
-name: Download Python Dependencies
+name: Download Python Dependencies (Failsafe)
 
 on:
   workflow_dispatch:
@@ -16,54 +16,62 @@ jobs:
       with:
         python-version: '3.9'
     
-    - name: Install pipenv
-      run: pip install pipenv
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip
     
-    - name: Verify Pipfile.lock exists
+    - name: Download packages bypassing dependency resolver
       run: |
-        echo "🔍 Verificando archivos..."
-        ls -la
-        if [ ! -f "Pipfile.lock" ]; then
-          echo "❌ ERROR: Pipfile.lock no encontrado"
-          exit 1
-        fi
-        echo "✅ Pipfile.lock encontrado"
-    
-    - name: Generate requirements.txt from Pipfile.lock
-      run: |
-        echo "📋 Generando requirements.txt desde Pipfile.lock..."
+        cat << 'EOF' > download_all.py
+        import json
+        import subprocess
+        import sys
+        import os
+
+        print("📖 Leyendo Pipfile.lock...")
+        with open('Pipfile.lock', 'r') as f:
+            lock_data = json.load(f)
+
+        packages = []
+        # Extraer paquetes de las secciones default y develop
+        for section in ['default', 'develop']:
+            if section in lock_data:
+                for pkg_name, pkg_info in lock_data[section].items():
+                    if 'version' in pkg_info:
+                        version = pkg_info['version']
+                        packages.append(f"{pkg_name}{version}")
+
+        print(f"📦 Se encontraron {len(packages)} paquetes en el lockfile.")
+        os.makedirs('python-packages', exist_ok=True)
+
+        # Crear un requirements.txt limpio (solo nombre==version)
+        with open('python-packages/requirements.txt', 'w') as f:
+            for pkg in packages:
+                f.write(pkg + "\n")
+
+        failed = []
+        # Descargar cada paquete INDIVIDUALMENTE sin resolver dependencias
+        for i, pkg in enumerate(packages):
+            print(f"[{i+1}/{len(packages)}] Descargando {pkg}...")
+            cmd = [sys.executable, "-m", "pip", "download", pkg, "--no-deps", "-d", "python-packages/"]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"⚠️ Falló {pkg}: {result.stderr}")
+                failed.append(pkg)
+
+        print(f"\n✅ Descarga completada. Fallaron {len(failed)} paquetes.")
+        if failed:
+            print("Paquetes fallidos:", failed)
+        EOF
         
-        # Generar requirements.txt con versiones EXACTAS
-        pipenv requirements > requirements.txt
+        python download_all.py
         
-        echo "📊 Primeras 20 líneas de requirements.txt:"
-        head -20 requirements.txt
-        
-        echo "📊 Total de paquetes:"
-        wc -l requirements.txt
-    
-    - name: Download all packages
-      run: |
-        echo "📦 Descargando paquetes Python..."
-        mkdir -p python-packages
-        
-        # Descargar todos los paquetes con las versiones exactas
-        # Usamos --no-deps porque requirements.txt ya tiene todas las dependencias
-        pip download -r requirements.txt -d python-packages/ --no-deps
-        
-        # Ver qué se descargó
-        echo "📊 Archivos descargados:"
-        ls python-packages/ | head -20
-        echo "Total archivos: $(ls python-packages/ | wc -l)"
+        echo "📊 Total de archivos descargados:"
+        ls python-packages/ | wc -l
         du -sh python-packages/
-    
-    - name: Copy requirements.txt to packages folder
-      run: cp requirements.txt python-packages/
     
     - name: Compress packages
       run: |
         tar -czf python-dependencies.tar.gz python-packages/
-        echo "📦 Tamaño del archivo comprimido:"
         ls -lh python-dependencies.tar.gz
     
     - name: Upload artifact
