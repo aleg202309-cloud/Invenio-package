@@ -1,0 +1,50 @@
+name: Download Python Dependencies
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download-deps:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install pipenv
+      run: pip install pipenv
+    
+    - name: Download all Python packages
+      run: |
+        echo "📦 Descargando dependencias Python..."
+        mkdir -p python-packages
+        
+        # Generar requirements.txt desde Pipfile.lock
+        pipenv requirements > requirements.txt
+        
+        # Descargar todos los paquetes
+        cd python-packages
+        pip download -r ../requirements.txt -d .
+        
+        # Ver qué se descargó
+        echo "📊 Archivos descargados:"
+        ls -lh | head -10
+        du -sh .
+    
+    - name: Compress packages
+      run: |
+        tar -czf python-dependencies.tar.gz python-packages/
+        echo "📦 Tamaño del archivo comprimido:"
+        ls -lh python-dependencies.tar.gz
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-dependencies
+        path: python-dependencies.tar.gz
+        retention-days: 30
